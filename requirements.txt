@@ -1,0 +1,6 @@
+flask
+streamlit
+sentence-transformers
+torch
+scikit-learn
+numpy

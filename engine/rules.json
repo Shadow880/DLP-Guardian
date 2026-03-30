@@ -1,0 +1,198 @@
+[
+  {
+    "id": "rule-001",
+    "type": "dont",
+    "title": "No client data to external AI",
+    "description": "Users must not share client data, confidential customer information, or any client-owned content with external AI tools.",
+    "examples": [
+      "Summarize this customer proposal",
+      "Rewrite this client email",
+      "Analyse this client dataset"
+    ],
+    "severity": "high",
+    "user_message": "You cannot send client or confidential data to external AI tools. Use the internal AI assistant or redacted data instead."
+  },
+  {
+    "id": "rule-002",
+    "type": "dont",
+    "title": "No source code or technical configurations to external AI",
+    "description": "Users must not paste proprietary source code, scripts, architecture diagrams, infrastructure configuration, server details, or internal technical documents into external AI tools.",
+    "examples": [
+      "Review this internal Python code",
+      "Fix this Terraform file",
+      "Explain this internal architecture document"
+    ],
+    "severity": "high",
+    "user_message": "Internal code, scripts, and technical configurations must not be shared with external AI tools."
+  },
+  {
+    "id": "rule-003",
+    "type": "warn",
+    "title": "Personal or regulated data needs caution",
+    "description": "Personally identifiable information, regulated identifiers, or sensitive personal records should not be casually shared. If used, they must be redacted and handled carefully.",
+    "examples": [
+      "Summarize this customer PAN and address record",
+      "Improve this employee identity sheet",
+      "Rewrite this account holder form"
+    ],
+    "severity": "medium",
+    "user_message": "This may contain personal or regulated data. Redact sensitive fields before using external AI."
+  },
+  {
+    "id": "rule-004",
+    "type": "do",
+    "title": "Generic learning questions allowed",
+    "description": "Users may ask generic technical or learning questions as long as they include no internal or client data.",
+    "examples": [
+      "Explain what TLS is",
+      "What is a firewall?",
+      "Give a simple explanation of IAM",
+      "How does DLP work in general?"
+    ],
+    "severity": "low",
+    "user_message": "Generic learning questions like this are allowed. Avoid including internal names or data."
+  },
+  {
+    "id": "rule-005",
+    "type": "dont",
+    "title": "No financial or pricing information to external AI",
+    "description": "Users must not share quotations, pricing sheets, financial forecasts, budgets, margins, or commercial pricing data with external AI tools.",
+    "examples": [
+      "Summarize this pricing sheet for our customer",
+      "Improve this cost estimate and margin table",
+      "Analyse this budget forecast for next quarter"
+    ],
+    "severity": "high",
+    "user_message": "Financial and pricing information cannot be shared with external AI tools."
+  },
+  {
+    "id": "rule-006",
+    "type": "dont",
+    "title": "No legal or contractual documents to external AI",
+    "description": "Users must not upload or paste agreements, NDAs, terms and conditions, procurement contracts, or legal review notes into external AI tools.",
+    "examples": [
+      "Please simplify this NDA",
+      "Summarize this vendor agreement",
+      "Review these contract clauses for legal risk"
+    ],
+    "severity": "high",
+    "user_message": "Legal and contractual documents must not be shared with external AI tools."
+  },
+  {
+    "id": "rule-007",
+    "type": "dont",
+    "title": "No credentials or secrets to external AI",
+    "description": "Users must not share passwords, API keys, tokens, private keys, connection strings, or secrets with external AI tools.",
+    "examples": [
+      "Here is my API key, help me debug this",
+      "Check this .env file for errors",
+      "Explain this private key issue"
+    ],
+    "severity": "critical",
+    "user_message": "Passwords, API keys, tokens, and secrets must never be shared with external AI tools."
+  },
+  {
+    "id": "rule-008",
+    "type": "dont",
+    "title": "No internal HR or employee-sensitive data to external AI",
+    "description": "Users must not share salary information, performance reviews, employee grievances, appraisal notes, or internal HR records with external AI tools.",
+    "examples": [
+      "Summarize this employee appraisal",
+      "Improve wording for this HR grievance summary",
+      "Analyse this salary revision sheet"
+    ],
+    "severity": "high",
+    "user_message": "Employee and HR-sensitive information cannot be shared with external AI tools."
+  },
+  {
+    "id": "rule-009",
+    "type": "dont",
+    "title": "No confidential internal business documents to external AI",
+    "description": "Users must not share internal-only reports, management presentations, strategy notes, business plans, meeting minutes, or confidential internal documents with external AI tools.",
+    "examples": [
+      "Summarize these internal strategy notes",
+      "Rewrite this management review deck",
+      "Improve these internal meeting minutes"
+    ],
+    "severity": "high",
+    "user_message": "Confidential internal business documents must not be shared with external AI tools."
+  },
+  {
+    "id": "rule-010",
+    "type": "warn",
+    "title": "Security findings and incident details need caution",
+    "description": "Security incident notes, vulnerability findings, threat reports, or internal detection content should be handled carefully and ideally sanitized before external use.",
+    "examples": [
+      "Explain this SOC alert",
+      "Summarize this vulnerability note",
+      "Rewrite this incident report"
+    ],
+    "severity": "medium",
+    "user_message": "Security findings may contain sensitive internal details. Sanitize before using external AI."
+  },
+  {
+    "id": "rule-011",
+    "type": "do",
+    "title": "Public content drafting allowed",
+    "description": "Users may use external AI to improve wording for clearly public, non-confidential communication and general drafting tasks.",
+    "examples": [
+      "Improve this public invitation email",
+      "Rewrite this general announcement",
+      "Make this paragraph more concise"
+    ],
+    "severity": "low",
+    "user_message": "This looks like a safe public drafting use case."
+  },
+  {
+    "id": "rule-012",
+    "type": "warn",
+    "title": "Mixed business context requires review",
+    "description": "If a prompt mixes general writing with internal business context, user names, project names, or operational details, the content should be reviewed before submission.",
+    "examples": [
+      "Rewrite this internal update mail",
+      "Improve this project status summary",
+      "Draft a better explanation for this delivery issue"
+    ],
+    "severity": "medium",
+    "user_message": "This may contain internal business context. Review and redact before sending."
+  },
+  {
+    "id": "rule-013",
+    "type": "dont",
+    "title": "No database exports or records to external AI",
+    "description": "Users must not share tables, records, exported datasets, or raw database extracts that contain business, operational, or personal data.",
+    "examples": [
+      "Summarize this customer table",
+      "Analyse this CSV export",
+      "Find insights in this internal records dump"
+    ],
+    "severity": "high",
+    "user_message": "Raw records and data exports must not be shared with external AI tools."
+  },
+  {
+    "id": "rule-014",
+    "type": "warn",
+    "title": "Emails and communications may contain hidden sensitive data",
+    "description": "Email threads, chats, and communications can embed sensitive context even if they look harmless, so they should be reviewed before submission.",
+    "examples": [
+      "Rewrite this internal email thread",
+      "Summarize this client conversation",
+      "Improve this escalation message"
+    ],
+    "severity": "medium",
+    "user_message": "Messages and email threads may contain hidden sensitive context. Review carefully."
+  },
+  {
+    "id": "rule-015",
+    "type": "do",
+    "title": "General conceptual brainstorming allowed",
+    "description": "Non-confidential conceptual brainstorming, ideation, and generic academic explanation are allowed when they contain no internal identifiers or proprietary data.",
+    "examples": [
+      "Give me project ideas for DLP",
+      "Explain RAG architecture",
+      "Suggest features for a final year project"
+    ],
+    "severity": "low",
+    "user_message": "This is a general brainstorming use case and is allowed."
+  }
+]

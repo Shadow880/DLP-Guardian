@@ -1,0 +1,143 @@
+#dlp-check-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999999;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 10px;
+  background: #111827;
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+
+#dlp-result-box {
+  position: fixed;
+  bottom: 72px;
+  right: 20px;
+  z-index: 999999;
+  width: 340px;
+  padding: 12px;
+  border-radius: 12px;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  box-shadow: 0 8px 18px rgba(0,0,0,0.18);
+  background: white;
+  color: black;
+}
+
+#dlp-result-title {
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+#dlp-result-box.allow {
+  border-left: 6px solid #16a34a;
+}
+
+#dlp-result-box.warn {
+  border-left: 6px solid #eab308;
+}
+
+#dlp-result-box.block {
+  border-left: 6px solid #dc2626;
+}
+
+#dlp-result-box.info {
+  border-left: 6px solid #2563eb;
+}
+
+#dlp-modal {
+  display: none;
+  position: fixed;
+  z-index: 1000000;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#dlp-modal-overlay {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+#dlp-modal-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  background: white;
+  border-radius: 16px;
+  padding: 20px 18px;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.22);
+  font-family: Arial, sans-serif;
+  color: #111827;
+}
+
+#dlp-modal-box.warn {
+  border-top: 6px solid #eab308;
+}
+
+#dlp-modal-box.block {
+  border-top: 6px solid #dc2626;
+}
+
+#dlp-modal-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  margin-bottom: 10px;
+}
+
+#dlp-modal-heading {
+  margin: 0 0 10px 0;
+  font-size: 22px;
+}
+
+#dlp-modal-rule {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+#dlp-modal-text {
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 16px 0;
+}
+
+#dlp-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+#dlp-modal-actions button {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#dlp-modal-cancel {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+#dlp-modal-proceed {
+  background: #16a34a;
+  color: white;
+}
