@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from sentence_transformers import SentenceTransformer, util  # type: ignore
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 from engine.pattern_detector import detect_sensitive_patterns
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -10,8 +12,6 @@ RULES_PATH = BASE_DIR / "rules.json"
 with open(RULES_PATH, "r", encoding="utf-8") as f:
     rules = json.load(f)
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
 rule_texts = []
 for rule in rules:
     parts = [rule["title"], rule["description"]]
@@ -19,23 +19,25 @@ for rule in rules:
     full_text = "\n".join(parts)
     rule_texts.append(full_text)
 
-rule_embeddings = model.encode(rule_texts, convert_to_tensor=True)
+vectorizer = TfidfVectorizer(lowercase=True, stop_words="english", ngram_range=(1, 2))
+rule_matrix = vectorizer.fit_transform(rule_texts)
 
-HIGH_SIM = 0.28
-MED_SIM = 0.22
+HIGH_SIM = 0.20
+MED_SIM = 0.10
 
 
 def find_best_rule(user_text: str, top_k: int = 3):
-    query_emb = model.encode(user_text, convert_to_tensor=True)
-    cos_scores = util.pytorch_cos_sim(query_emb, rule_embeddings)[0]
-    top_results = cos_scores.topk(k=min(top_k, len(rules)))
+    query_vec = vectorizer.transform([user_text])
+    scores = cosine_similarity(query_vec, rule_matrix)[0]
+
+    ranked_indices = scores.argsort()[::-1][: min(top_k, len(rules))]
 
     matches = []
-    for score, idx in zip(top_results.values, top_results.indices):
+    for idx in ranked_indices:
         rule = rules[int(idx)]
         matches.append({
             "rule": rule,
-            "score": float(score)
+            "score": float(scores[idx])
         })
     return matches
 

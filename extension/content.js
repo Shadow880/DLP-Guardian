@@ -2,6 +2,8 @@ let isProcessing = false;
 let keyListenerAttached = false;
 let clickListenerAttached = false;
 let bypassNextClick = false;
+let modalOpen = false;
+let submitLocked = false;
 
 function sendToBackground(payload, callback) {
   try {
@@ -19,19 +21,6 @@ function sendToBackground(payload, callback) {
 
       if (lastError) {
         const msg = lastError.message || "";
-
-        if (msg.includes("Extension context invalidated")) {
-          console.warn("Extension context invalidated. Refresh the tab.");
-          updateResultBox("Extension context invalidated. Refresh the tab.", "warn");
-          return;
-        }
-
-        if (msg.includes("Receiving end does not exist")) {
-          console.warn("Background script not available. Reload extension.");
-          updateResultBox("Background not available. Reload extension.", "warn");
-          return;
-        }
-
         console.warn("Extension messaging warning:", msg);
         updateResultBox("Extension connection issue. Reload extension and refresh tab.", "warn");
         return;
@@ -40,14 +29,6 @@ function sendToBackground(payload, callback) {
       if (callback) callback(response);
     });
   } catch (err) {
-    const msg = String(err || "");
-
-    if (msg.includes("Extension context invalidated")) {
-      console.warn("Extension context invalidated. Refresh the tab.");
-      updateResultBox("Extension context invalidated. Refresh the tab.", "warn");
-      return;
-    }
-
     console.error("sendToBackground error:", err);
     updateResultBox("Extension messaging failed. Reload extension and refresh tab.", "warn");
   }
@@ -55,10 +36,8 @@ function sendToBackground(payload, callback) {
 
 function isVisible(el) {
   if (!el) return false;
-
   const style = window.getComputedStyle(el);
   const rect = el.getBoundingClientRect();
-
   return (
     style.display !== "none" &&
     style.visibility !== "hidden" &&
@@ -75,16 +54,11 @@ function getCandidateInputs() {
   ];
 
   const candidates = [];
-
   for (const selector of selectors) {
-    const nodes = document.querySelectorAll(selector);
-    nodes.forEach((el) => {
-      if (isVisible(el)) {
-        candidates.push(el);
-      }
+    document.querySelectorAll(selector).forEach((el) => {
+      if (isVisible(el)) candidates.push(el);
     });
   }
-
   return candidates;
 }
 
@@ -105,7 +79,6 @@ function findPromptBox() {
   }
 
   const candidates = getCandidateInputs();
-
   if (candidates.length > 0) {
     candidates.sort((a, b) => {
       const aRect = a.getBoundingClientRect();
@@ -120,7 +93,6 @@ function findPromptBox() {
 
 function getPromptText(el) {
   if (!el) return "";
-
   const tag = (el.tagName || "").toLowerCase();
 
   if (tag === "textarea" || tag === "input") {
@@ -148,7 +120,6 @@ function createResultBox() {
 function updateResultBox(text, level = "info") {
   const box = createResultBox();
   const body = document.getElementById("dlp-result-body");
-
   box.className = "";
   box.id = "dlp-result-box";
   box.classList.add(level);
@@ -180,9 +151,10 @@ function createModal() {
 
 function hideModal() {
   const modal = document.getElementById("dlp-modal");
-  if (modal) {
-    modal.style.display = "none";
-  }
+  if (modal) modal.style.display = "none";
+  modalOpen = false;
+  submitLocked = false;
+  enableSendButtons();
 }
 
 function showModal({
@@ -202,8 +174,11 @@ function showModal({
   const proceedBtn = document.getElementById("dlp-modal-proceed");
   const cancelBtn = document.getElementById("dlp-modal-cancel");
 
-  modal.style.display = "block";
+  modalOpen = true;
+  submitLocked = true;
+  disableSendButtons();
 
+  modal.style.display = "block";
   box.className = "";
   box.id = "dlp-modal-box";
   box.classList.add(mode);
@@ -239,26 +214,46 @@ function findSendButtons() {
   ];
 
   const buttons = [];
-
   for (const selector of selectors) {
     document.querySelectorAll(selector).forEach((btn) => {
-      if (btn && !btn.disabled && isVisible(btn)) {
-        buttons.push(btn);
-      }
+      if (btn && isVisible(btn)) buttons.push(btn);
     });
   }
-
   return buttons;
+}
+
+function disableSendButtons() {
+  findSendButtons().forEach((btn) => {
+    btn.dataset.dlpDisabled = "true";
+    btn.disabled = true;
+    btn.style.pointerEvents = "none";
+    btn.style.opacity = "0.6";
+  });
+}
+
+function enableSendButtons() {
+  findSendButtons().forEach((btn) => {
+    if (btn.dataset.dlpDisabled === "true") {
+      btn.disabled = false;
+      btn.style.pointerEvents = "";
+      btn.style.opacity = "";
+      delete btn.dataset.dlpDisabled;
+    }
+  });
 }
 
 function clickSendButton() {
   const buttons = findSendButtons();
+  const target = buttons.find((btn) => !btn.disabled) || buttons[0];
 
-  if (buttons.length > 0) {
-    buttons[0].click();
+  if (target) {
+    bypassNextClick = true;
+    target.disabled = false;
+    target.style.pointerEvents = "";
+    target.style.opacity = "";
+    target.click();
     return true;
   }
-
   return false;
 }
 
@@ -268,6 +263,21 @@ function findSendButtonFromTarget(target) {
   return target.closest(
     'button[data-testid*="send"], button[aria-label*="Send"], button[aria-label*="send"]'
   );
+}
+
+function blurPrompt() {
+  const promptBox = findPromptBox();
+  if (promptBox && typeof promptBox.blur === "function") {
+    promptBox.blur();
+  }
+}
+
+function swallowSubmitEvent(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === "function") {
+    e.stopImmediatePropagation();
+  }
 }
 
 function processPromptSubmission(promptText, sendAction) {
@@ -280,10 +290,7 @@ function processPromptSubmission(promptText, sendAction) {
   updateResultBox("Checking before send...", "info");
 
   sendToBackground(
-    {
-      type: "CHECK_PROMPT",
-      text: promptText
-    },
+    { type: "CHECK_PROMPT", text: promptText },
     (response) => {
       if (!response || !response.ok) {
         updateResultBox(
@@ -313,6 +320,7 @@ function processPromptSubmission(promptText, sendAction) {
 
       if (action === "block") {
         updateResultBox(`BLOCK | ${rule} | severity: ${severity} | sim: ${similarity}`, "block");
+        blurPrompt();
         showModal({
           mode: "block",
           rule,
@@ -328,6 +336,7 @@ function processPromptSubmission(promptText, sendAction) {
 
       if (action === "warn") {
         updateResultBox(`WARN | ${rule} | severity: ${severity} | sim: ${similarity}`, "warn");
+        blurPrompt();
         showModal({
           mode: "warn",
           rule,
@@ -350,7 +359,6 @@ function processPromptSubmission(promptText, sendAction) {
       }
 
       updateResultBox(`ALLOW | ${rule} | severity: ${severity} | sim: ${similarity}`, "allow");
-
       setTimeout(() => {
         sendAction();
         isProcessing = false;
@@ -371,10 +379,7 @@ function runManualCheck() {
   updateResultBox("Checking prompt...", "info");
 
   sendToBackground(
-    {
-      type: "CHECK_PROMPT",
-      text: promptText
-    },
+    { type: "CHECK_PROMPT", text: promptText },
     (response) => {
       if (!response || !response.ok) {
         updateResultBox(
@@ -402,24 +407,10 @@ function runManualCheck() {
 
       if (action === "block") {
         updateResultBox(`BLOCK | ${rule} | severity: ${severity} | sim: ${similarity}`, "block");
-        showModal({
-          mode: "block",
-          rule,
-          severity,
-          similarity,
-          message: msg
-        });
+        showModal({ mode: "block", rule, severity, similarity, message: msg });
       } else if (action === "warn") {
         updateResultBox(`WARN | ${rule} | severity: ${severity} | sim: ${similarity}`, "warn");
-        showModal({
-          mode: "warn",
-          rule,
-          severity,
-          similarity,
-          message: msg,
-          onProceed: () => {},
-          onCancel: () => {}
-        });
+        showModal({ mode: "warn", rule, severity, similarity, message: msg });
       } else {
         updateResultBox(`ALLOW | ${rule} | severity: ${severity} | sim: ${similarity}`, "allow");
       }
@@ -434,12 +425,20 @@ function createCheckButton() {
   btn.id = "dlp-check-btn";
   btn.textContent = "Check Prompt";
   btn.addEventListener("click", runManualCheck);
-
   document.body.appendChild(btn);
 }
 
 function handleSubmitIntercept(e) {
-  if (isProcessing) return;
+  if (modalOpen || submitLocked) {
+    if (e.key === "Enter") swallowSubmitEvent(e);
+    return;
+  }
+
+  if (isProcessing) {
+    if (e.key === "Enter") swallowSubmitEvent(e);
+    return;
+  }
+
   if (e.defaultPrevented) return;
   if (e.key !== "Enter") return;
   if (e.shiftKey) return;
@@ -453,9 +452,7 @@ function handleSubmitIntercept(e) {
   const promptText = getPromptText(promptBox);
   if (!promptText) return;
 
-  e.preventDefault();
-  e.stopPropagation();
-
+  swallowSubmitEvent(e);
   isProcessing = true;
 
   processPromptSubmission(promptText, () => {
@@ -463,7 +460,18 @@ function handleSubmitIntercept(e) {
   });
 }
 
+function handleKeyPressLikeIntercept(e) {
+  if (!modalOpen && !submitLocked) return;
+  if (e.key === "Enter") swallowSubmitEvent(e);
+}
+
 function handleClickIntercept(e) {
+  if (modalOpen || submitLocked) {
+    const maybeBtn = findSendButtonFromTarget(e.target);
+    if (maybeBtn) swallowSubmitEvent(e);
+    return;
+  }
+
   if (isProcessing) return;
 
   const sendBtn = findSendButtonFromTarget(e.target);
@@ -478,17 +486,14 @@ function handleClickIntercept(e) {
   const promptText = getPromptText(promptBox);
   if (!promptText) return;
 
-  e.preventDefault();
-  e.stopPropagation();
-
-  if (typeof e.stopImmediatePropagation === "function") {
-    e.stopImmediatePropagation();
-  }
-
+  swallowSubmitEvent(e);
   isProcessing = true;
 
   processPromptSubmission(promptText, () => {
     bypassNextClick = true;
+    sendBtn.disabled = false;
+    sendBtn.style.pointerEvents = "";
+    sendBtn.style.opacity = "";
     sendBtn.click();
   });
 }
@@ -500,6 +505,8 @@ function init() {
 
   if (!keyListenerAttached) {
     document.addEventListener("keydown", handleSubmitIntercept, true);
+    document.addEventListener("keypress", handleKeyPressLikeIntercept, true);
+    document.addEventListener("keyup", handleKeyPressLikeIntercept, true);
     keyListenerAttached = true;
   }
 
@@ -512,6 +519,7 @@ function init() {
 setInterval(() => {
   createCheckButton();
   createResultBox();
-}, 2000);
+  if (modalOpen || submitLocked) disableSendButtons();
+}, 1000);
 
 init();
