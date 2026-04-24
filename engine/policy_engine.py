@@ -4,53 +4,74 @@ from pathlib import Path
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from engine.pattern_detector import detect_sensitive_patterns
+from engine.pattern_detector import detect_sensitive_patterns, calculate_pattern_score
+from engine.context_detector import calculate_context_score
+from engine.fuzzy_detector import calculate_fuzzy_score
+from engine.redactor import redact_text
+from engine.role_engine import get_user_role, adjust_decision_by_role
+from engine.site_policy_engine import adjust_decision_by_site
 
-BASE_DIR = Path(__file__).resolve().parent
-RULES_PATH = BASE_DIR / "rules.json"
+BASE_DIR = Path(__file__).resolve().parent.parent
+RULES_PATH = BASE_DIR / "data" / "rules.json"
 
 with open(RULES_PATH, "r", encoding="utf-8") as f:
     rules = json.load(f)
 
 rule_texts = []
 for rule in rules:
-    parts = [rule["title"], rule["description"]]
+    parts = [rule.get("title", ""), rule.get("description", "")]
     parts.extend(rule.get("examples", []))
-    full_text = "\n".join(parts)
-    rule_texts.append(full_text)
+    rule_texts.append("\n".join(parts))
 
 vectorizer = TfidfVectorizer(lowercase=True, stop_words="english", ngram_range=(1, 2))
 rule_matrix = vectorizer.fit_transform(rule_texts)
 
-HIGH_SIM = 0.20
-MED_SIM = 0.10
+HARD_BLOCK_PATTERNS = {
+    "api_key", "bearer_token", "password",
+    "env_secret", "private_key", "pan", "aadhaar"
+}
 
 
-def find_best_rule(user_text: str, top_k: int = 3):
-    query_vec = vectorizer.transform([user_text])
-    scores = cosine_similarity(query_vec, rule_matrix)[0]
-
-    ranked_indices = scores.argsort()[::-1][: min(top_k, len(rules))]
-
-    matches = []
-    for idx in ranked_indices:
-        rule = rules[int(idx)]
-        matches.append({
-            "rule": rule,
-            "score": float(scores[idx])
-        })
-    return matches
+def find_best_rule(text: str):
+    vec = vectorizer.transform([text])
+    scores = cosine_similarity(vec, rule_matrix)[0]
+    idx = int(scores.argmax())
+    return rules[idx], float(scores[idx])
 
 
-def decide_on_text(user_text: str):
-    pattern_hits = detect_sensitive_patterns(user_text)
-    top_matches = find_best_rule(user_text, top_k=3)
+def calculate_semantic_score(similarity: float, has_context: bool) -> int:
+    if not has_context:
+        return int(similarity * 20)
+    return int(similarity * 50)
 
-    if pattern_hits:
-        return {
+
+def decide_action(risk: int) -> str:
+    if risk < 12:
+        return "allow"
+    if risk < 52:
+        return "warn"
+    return "block"
+
+
+def finalize(decision: dict, user: str, source: str):
+    role = get_user_role(user)
+    decision = adjust_decision_by_role(user, role, decision)
+    decision = adjust_decision_by_site(source, decision)
+    return decision
+
+
+def decide_on_text(text: str, user: str = "unknown", source: str = "unknown"):
+    patterns = detect_sensitive_patterns(text)
+    pattern_score = calculate_pattern_score(patterns)
+    pattern_types = {p["type"] for p in patterns}
+    redacted = redact_text(text)
+
+    if pattern_types & HARD_BLOCK_PATTERNS:
+        decision = {
             "allowed": False,
             "action": "block",
-            "reason": "pattern_detected",
+            "reason": "hard_pattern",
+            "message": "Sensitive data detected.",
             "matched_rule": {
                 "id": "pattern-detection",
                 "title": "Sensitive Pattern Detection",
@@ -58,93 +79,49 @@ def decide_on_text(user_text: str):
                 "severity": "high",
                 "similarity": 1.0
             },
-            "message": "Sensitive data pattern detected in the prompt.",
-            "pattern_hits": pattern_hits,
-            "detection_source": "pattern"
+            "pattern_hits": patterns,
+            "pattern_score": pattern_score,
+            "semantic_score": 0.0,
+            "context_score": 0,
+            "fuzzy_score": 0,
+            "risk_score": 90,
+            "redaction_available": redacted != text,
+            "redacted_text": redacted if redacted != text else "",
+            "user": user,
+            "text": text
         }
+        return finalize(decision, user, source)
 
-    if not top_matches:
-        return {
-            "allowed": True,
-            "action": "allow",
-            "reason": "no_rules",
-            "matched_rule": None,
-            "message": "No policy rules defined. Allowed by default.",
-            "pattern_hits": [],
-            "detection_source": "none"
-        }
+    rule, sim = find_best_rule(text)
+    context_score = calculate_context_score(text)
+    fuzzy_score = calculate_fuzzy_score(text)
+    semantic_score = calculate_semantic_score(sim, context_score > 0)
 
-    best = top_matches[0]
-    rule = best["rule"]
-    score = best["score"]
-
-    rule_type = rule.get("type", "unknown")
-    severity = rule.get("severity", "low")
+    risk = min(pattern_score + context_score + fuzzy_score + semantic_score, 100)
+    action = decide_action(risk)
 
     decision = {
+        "allowed": action == "allow",
+        "action": action,
+        "reason": "hybrid",
+        "message": rule.get("user_message", "Policy decision generated."),
         "matched_rule": {
-            "id": rule["id"],
-            "title": rule["title"],
-            "type": rule_type,
-            "severity": severity,
-            "similarity": score
+            "id": rule.get("id", ""),
+            "title": rule.get("title", "Matched Policy Rule"),
+            "type": rule.get("type", "unknown"),
+            "severity": rule.get("severity", "medium"),
+            "similarity": sim
         },
-        "pattern_hits": [],
-        "detection_source": "semantic"
+        "pattern_hits": patterns,
+        "pattern_score": pattern_score,
+        "semantic_score": sim,
+        "context_score": context_score,
+        "fuzzy_score": fuzzy_score,
+        "risk_score": risk,
+        "redaction_available": redacted != text,
+        "redacted_text": redacted if redacted != text else "",
+        "user": user,
+        "text": text
     }
 
-    if score < MED_SIM:
-        decision.update({
-            "allowed": True,
-            "action": "allow",
-            "reason": "low_similarity",
-            "message": "No strong policy match. Allowed, but should be monitored."
-        })
-        return decision
-
-    if rule_type == "dont":
-        if score >= HIGH_SIM:
-            decision.update({
-                "allowed": False,
-                "action": "block",
-                "reason": "matched_dont_high",
-                "message": rule.get("user_message", "This action is not allowed.")
-            })
-        else:
-            decision.update({
-                "allowed": False,
-                "action": "warn",
-                "reason": "matched_dont_medium",
-                "message": rule.get("user_message", "This may violate policy. Proceed with caution.")
-            })
-
-    elif rule_type == "warn":
-        decision.update({
-            "allowed": False,
-            "action": "warn",
-            "reason": "matched_warn",
-            "message": rule.get("user_message", "This may contain sensitive information. Proceed with caution.")
-        })
-
-    elif rule_type == "do":
-        decision.update({
-            "allowed": True,
-            "action": "allow",
-            "reason": "matched_do",
-            "message": rule.get("user_message", "This action is allowed under current policy.")
-        })
-
-    else:
-        decision.update({
-            "allowed": True,
-            "action": "allow",
-            "reason": "unknown_rule_type",
-            "message": "Rule type unknown; allowing."
-        })
-
-    return decision
-
-
-if __name__ == "__main__":
-    sample_text = "Here is a customer contract with confidential pricing. Please summarize it."
-    print(decide_on_text(sample_text))
+    return finalize(decision, user, source)

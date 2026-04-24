@@ -3,13 +3,11 @@
   "name": "Local DLP Prompt Guard",
   "version": "1.0",
   "description": "Checks AI prompts against a local DLP policy engine before submission.",
-  "permissions": ["activeTab", "scripting"],
+  "permissions": ["activeTab", "scripting", "tabs"],
   "host_permissions": [
     "http://127.0.0.1:8000/*",
-    "https://chatgpt.com/*",
-    "https://*.chatgpt.com/*",
-    "https://chat.openai.com/*",
-    "https://gemini.google.com/*"
+    "https://*/*",
+    "http://*/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -17,10 +15,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://chatgpt.com/*",
-        "https://*.chatgpt.com/*",
-        "https://chat.openai.com/*",
-         "https://gemini.google.com/*"
+        "https://*/*",
+        "http://*/*"
       ],
       "js": ["content.js"],
       "css": ["styles.css"],

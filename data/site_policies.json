@@ -1,0 +1,32 @@
+[
+  {
+    "domain": "gemini.google.com",
+    "label": "Gemini",
+    "mode": "warn",
+    "enabled": true
+  },
+  {
+    "domain": "chatgpt.com",
+    "label": "Chatgpt1",
+    "mode": "monitor",
+    "enabled": true
+  },
+  {
+    "domain": "www.perplexity.ai",
+    "label": "Perplexity",
+    "mode": "warn",
+    "enabled": true
+  },
+  {
+    "domain": "copilot.microsoft.com",
+    "label": "copilot",
+    "mode": "strict",
+    "enabled": true
+  },
+  {
+    "domain": "claude.ai",
+    "label": "claude",
+    "mode": "strict",
+    "enabled": true
+  }
+]

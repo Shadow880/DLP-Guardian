@@ -4,6 +4,62 @@ let clickListenerAttached = false;
 let bypassNextClick = false;
 let modalOpen = false;
 let submitLocked = false;
+let dlpSiteEnabled = false;
+
+function getCurrentDomain() {
+  try {
+    return window.location.hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function domainMatches(policyDomain, currentDomain) {
+  if (!policyDomain || !currentDomain) return false;
+
+  policyDomain = String(policyDomain).toLowerCase();
+  currentDomain = String(currentDomain).toLowerCase();
+
+  return currentDomain === policyDomain || currentDomain.endsWith("." + policyDomain);
+}
+
+function loadSitePolicyStatus() {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: "GET_SITE_POLICIES" }, (response) => {
+        const lastError = chrome.runtime.lastError;
+        if (lastError) {
+          console.error("Failed to load site policies:", lastError.message);
+          dlpSiteEnabled = false;
+          resolve(false);
+          return;
+        }
+
+        if (!response || !response.ok) {
+          console.error("Failed to load site policies:", response?.error || "Unknown error");
+          dlpSiteEnabled = false;
+          resolve(false);
+          return;
+        }
+
+        const sites = response.data?.sites || [];
+        const currentDomain = getCurrentDomain();
+
+        const matched = sites.find(
+          (site) => site.enabled === true && domainMatches(site.domain, currentDomain)
+        );
+
+        dlpSiteEnabled = !!matched;
+        console.log("DLP site enabled:", dlpSiteEnabled, "for", currentDomain);
+        resolve(dlpSiteEnabled);
+      });
+    } catch (err) {
+      console.error("Failed to load site policies:", err);
+      dlpSiteEnabled = false;
+      resolve(false);
+    }
+  });
+}
 
 function sendToBackground(payload, callback) {
   try {
@@ -12,7 +68,7 @@ function sendToBackground(payload, callback) {
 
     if (!runtime || typeof runtime.sendMessage !== "function") {
       console.warn("Extension runtime unavailable");
-      updateResultBox("Extension not connected. Reload extension and refresh tab.", "warn");
+      updateResultBox("Extension not connected. Reload extension and reopen tab.", "warn");
       return;
     }
 
@@ -21,19 +77,42 @@ function sendToBackground(payload, callback) {
 
       if (lastError) {
         const msg = lastError.message || "";
-        console.warn("Extension messaging warning:", msg);
-        updateResultBox("Extension connection issue. Reload extension and refresh tab.", "warn");
+
+        if (
+          msg.includes("Extension context invalidated") ||
+          msg.includes("Could not establish connection") ||
+          msg.includes("The message port closed")
+        ) {
+          console.warn("Extension context invalidated — reopen this tab.");
+          updateResultBox(
+            "Extension was reloaded. Please close and reopen this tab.",
+            "warn"
+          );
+          // reset processing state so the page isn't stuck
+          isProcessing = false;
+          submitLocked = false;
+          modalOpen = false;
+          enableSendButtons();
+          return;
+        }
+
+        console.error("sendToBackground error:", lastError);
+        updateResultBox("Extension communication error.", "warn");
+        isProcessing = false;
+        enableSendButtons();
         return;
       }
 
       if (callback) callback(response);
     });
+
   } catch (err) {
     console.error("sendToBackground error:", err);
-    updateResultBox("Extension messaging failed. Reload extension and refresh tab.", "warn");
+    updateResultBox("Extension communication failed.", "warn");
+    isProcessing = false;
+    enableSendButtons();
   }
 }
-
 function isVisible(el) {
   if (!el) return false;
   const style = window.getComputedStyle(el);
@@ -139,6 +218,7 @@ function createModal() {
       <h3 id="dlp-modal-heading">Warning</h3>
       <div id="dlp-modal-rule"></div>
       <p id="dlp-modal-text"></p>
+      <div id="dlp-modal-redaction" style="display:none;"></div>
       <div id="dlp-modal-actions">
         <button id="dlp-modal-cancel">Cancel</button>
         <button id="dlp-modal-proceed">Proceed</button>
@@ -157,12 +237,23 @@ function hideModal() {
   enableSendButtons();
 }
 
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function showModal({
   mode = "warn",
   rule = "No matched rule",
   severity = "unknown",
   similarity = "N/A",
   message = "No message",
+  riskScore = "N/A",
+  detectionSource = "unknown",
+  redactionAvailable = false,
+  redactedText = "",
   onProceed = null,
   onCancel = null
 }) {
@@ -171,6 +262,7 @@ function showModal({
   const heading = document.getElementById("dlp-modal-heading");
   const ruleEl = document.getElementById("dlp-modal-rule");
   const textEl = document.getElementById("dlp-modal-text");
+  const redactionEl = document.getElementById("dlp-modal-redaction");
   const proceedBtn = document.getElementById("dlp-modal-proceed");
   const cancelBtn = document.getElementById("dlp-modal-cancel");
 
@@ -184,8 +276,21 @@ function showModal({
   box.classList.add(mode);
 
   heading.textContent = mode === "block" ? "Blocked by Policy" : "Policy Warning";
-  ruleEl.textContent = `${rule} | severity: ${severity} | sim: ${similarity}`;
+  ruleEl.textContent = `${rule} | severity: ${severity} | sim: ${similarity} | risk: ${riskScore} | source: ${detectionSource}`;
   textEl.textContent = message;
+
+  if (redactionAvailable && redactedText) {
+    redactionEl.innerHTML = `
+      <div style="margin-top:12px; font-weight:700;">Suggested Redacted Version</div>
+      <div style="margin-top:6px; padding:10px; border-radius:8px; background:#f3f4f6; font-size:13px; white-space:pre-wrap; line-height:1.4;">
+        ${escapeHtml(redactedText)}
+      </div>
+    `;
+    redactionEl.style.display = "block";
+  } else {
+    redactionEl.innerHTML = "";
+    redactionEl.style.display = "none";
+  }
 
   if (mode === "block") {
     proceedBtn.style.display = "none";
@@ -317,16 +422,27 @@ function processPromptSubmission(promptText, sendAction) {
         typeof matchedRule.similarity === "number"
           ? matchedRule.similarity.toFixed(3)
           : "N/A";
+      const riskScore = result.risk_score ?? "N/A";
+      const detectionSource = result.detection_source || "unknown";
+      const redactionAvailable = result.redaction_available || false;
+      const redactedText = result.redacted_text || "";
 
       if (action === "block") {
-        updateResultBox(`BLOCK | ${rule} | severity: ${severity} | sim: ${similarity}`, "block");
+        updateResultBox(
+          `BLOCK | ${rule} | severity: ${severity} | sim: ${similarity} | risk: ${riskScore} | source: ${detectionSource}`,
+          "block"
+        );
         blurPrompt();
         showModal({
           mode: "block",
           rule,
           severity,
           similarity,
+          riskScore,
+          detectionSource,
           message: msg,
+          redactionAvailable,
+          redactedText,
           onCancel: () => {
             isProcessing = false;
           }
@@ -335,16 +451,26 @@ function processPromptSubmission(promptText, sendAction) {
       }
 
       if (action === "warn") {
-        updateResultBox(`WARN | ${rule} | severity: ${severity} | sim: ${similarity}`, "warn");
+        updateResultBox(
+          `WARN | ${rule} | severity: ${severity} | sim: ${similarity} | risk: ${riskScore} | source: ${detectionSource}`,
+          "warn"
+        );
         blurPrompt();
         showModal({
           mode: "warn",
           rule,
           severity,
           similarity,
+          riskScore,
+          detectionSource,
           message: msg,
+          redactionAvailable,
+          redactedText,
           onProceed: () => {
-            updateResultBox(`ALLOW | ${rule} | severity: ${severity} | sim: ${similarity}`, "allow");
+            updateResultBox(
+              `ALLOW | ${rule} | severity: ${severity} | sim: ${similarity} | risk: ${riskScore} | source: ${detectionSource}`,
+              "allow"
+            );
             setTimeout(() => {
               sendAction();
               isProcessing = false;
@@ -358,7 +484,10 @@ function processPromptSubmission(promptText, sendAction) {
         return;
       }
 
-      updateResultBox(`ALLOW | ${rule} | severity: ${severity} | sim: ${similarity}`, "allow");
+      updateResultBox(
+        `ALLOW | ${rule} | severity: ${severity} | sim: ${similarity} | risk: ${riskScore} | source: ${detectionSource}`,
+        "allow"
+      );
       setTimeout(() => {
         sendAction();
         isProcessing = false;
@@ -367,7 +496,10 @@ function processPromptSubmission(promptText, sendAction) {
   );
 }
 
+
+
 function runManualCheck() {
+  if (!dlpSiteEnabled) return;
   const promptBox = findPromptBox();
   const promptText = getPromptText(promptBox);
 
@@ -404,15 +536,50 @@ function runManualCheck() {
         typeof matchedRule.similarity === "number"
           ? matchedRule.similarity.toFixed(3)
           : "N/A";
+      const riskScore = result.risk_score ?? "N/A";
+      const detectionSource = result.detection_source || "unknown";
+      const redactionAvailable = result.redaction_available || false;
+      const redactedText = result.redacted_text || "";
 
       if (action === "block") {
-        updateResultBox(`BLOCK | ${rule} | severity: ${severity} | sim: ${similarity}`, "block");
-        showModal({ mode: "block", rule, severity, similarity, message: msg });
+        updateResultBox(
+          `BLOCK | ${rule} | severity: ${severity} | sim: ${similarity} | risk: ${riskScore} | source: ${detectionSource}`,
+          "block"
+        );
+        showModal({
+          mode: "block",
+          rule,
+          severity,
+          similarity,
+          riskScore,
+          detectionSource,
+          message: msg,
+          redactionAvailable,
+          redactedText
+        });
       } else if (action === "warn") {
-        updateResultBox(`WARN | ${rule} | severity: ${severity} | sim: ${similarity}`, "warn");
-        showModal({ mode: "warn", rule, severity, similarity, message: msg });
+        updateResultBox(
+          `WARN | ${rule} | severity: ${severity} | sim: ${similarity} | risk: ${riskScore} | source: ${detectionSource}`,
+          "warn"
+        );
+        showModal({
+          mode: "warn",
+          rule,
+          severity,
+          similarity,
+          riskScore,
+          detectionSource,
+          message: msg,
+          redactionAvailable,
+          redactedText,
+          onProceed: () => {},
+          onCancel: () => {}
+        });
       } else {
-        updateResultBox(`ALLOW | ${rule} | severity: ${severity} | sim: ${similarity}`, "allow");
+        updateResultBox(
+          `ALLOW | ${rule} | severity: ${severity} | sim: ${similarity} | risk: ${riskScore} | source: ${detectionSource}`,
+          "allow"
+        );
       }
     }
   );
@@ -428,7 +595,9 @@ function createCheckButton() {
   document.body.appendChild(btn);
 }
 
+
 function handleSubmitIntercept(e) {
+  if (!dlpSiteEnabled) return;
   if (modalOpen || submitLocked) {
     if (e.key === "Enter") swallowSubmitEvent(e);
     return;
@@ -465,7 +634,9 @@ function handleKeyPressLikeIntercept(e) {
   if (e.key === "Enter") swallowSubmitEvent(e);
 }
 
+
 function handleClickIntercept(e) {
+  if (!dlpSiteEnabled) return;
   if (modalOpen || submitLocked) {
     const maybeBtn = findSendButtonFromTarget(e.target);
     if (maybeBtn) swallowSubmitEvent(e);
@@ -498,7 +669,14 @@ function handleClickIntercept(e) {
   });
 }
 
-function init() {
+async function init() {
+  await loadSitePolicyStatus();
+
+  if (!dlpSiteEnabled) {
+    console.log("DLP inactive on this site");
+    return;
+  }
+
   createCheckButton();
   createResultBox();
   createModal();
@@ -515,11 +693,4 @@ function init() {
     clickListenerAttached = true;
   }
 }
-
-setInterval(() => {
-  createCheckButton();
-  createResultBox();
-  if (modalOpen || submitLocked) disableSendButtons();
-}, 1000);
-
 init();
